@@ -1,16 +1,29 @@
-//! ppk2_tool core library.
+//! Host-side driver for Nordic's Power Profiler Kit II.
 
-/// Returns a greeting for `name`.
-pub fn greet(name: &str) -> String {
-    format!("hello, {name}")
-}
+pub mod cmd;
+pub mod device;
+pub mod measure;
+pub mod metadata;
+pub mod trace;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use cmd::{Command, PowerMode};
+pub use device::{Ppk2, find_ports};
+pub use measure::{Converter, RawSample};
+pub use metadata::Metadata;
+pub use trace::{Bucket, Trace};
 
-    #[test]
-    fn greet_includes_name() {
-        assert_eq!(greet("world"), "hello, world");
-    }
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("serial port: {0}")]
+    SerialPort(#[from] serialport::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("metadata field missing: {0}")]
+    MissingField(String),
+    #[error("metadata line not `key: number`: {0:?}")]
+    MalformedLine(String),
+    #[error("no END marker within timeout")]
+    MetadataTimeout,
+    #[error("source voltage {0} mV outside 800..=5000")]
+    VoltageOutOfRange(u16),
 }

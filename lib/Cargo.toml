@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-serialport = "4.10.1"
+serialport = { version = "4.10.1", default-features = false }
 thiserror = "2.0.21"
 
 [dev-dependencies]

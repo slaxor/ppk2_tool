@@ -19,3 +19,6 @@ fix:
 
 run *args:
     cargo run -p ppk2_tool-cli -- {{args}}
+
+gui *args:
+    cargo run -p ppk2_tool-gui -- {{args}}
