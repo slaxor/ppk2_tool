@@ -10,6 +10,8 @@ pub const SAMPLES_PER_SECOND: u32 = 100_000;
 const ADC_MASK: u32 = (1 << 14) - 1;
 const RANGE_SHIFT: u32 = 14;
 const RANGE_MASK: u32 = 0b111;
+const COUNTER_SHIFT: u32 = 18;
+const COUNTER_MASK: u32 = 0b11_1111;
 const LOGIC_SHIFT: u32 = 24;
 const ADC_VOLTS_PER_COUNT: f64 = 1.8 / 163_840.0;
 const AMPS_TO_MICROAMPS: f64 = 1e6;
@@ -19,6 +21,7 @@ const AMPS_TO_MICROAMPS: f64 = 1e6;
 pub struct RawSample {
     pub adc: u16,
     pub range: u8,
+    pub counter: u8,
     pub logic: u8,
 }
 
@@ -29,15 +32,19 @@ impl RawSample {
         RawSample {
             adc: (word & ADC_MASK) as u16,
             range: ((word >> RANGE_SHIFT) & RANGE_MASK) as u8,
+            counter: ((word >> COUNTER_SHIFT) & COUNTER_MASK) as u8,
             logic: (word >> LOGIC_SHIFT) as u8,
         }
     }
 }
 
-/// Splits an arbitrary byte stream into whole frames, carrying leftovers.
+/// Splits an arbitrary byte stream into whole frames, carrying leftovers,
+/// and counts frames the 6-bit rolling counter says went missing.
 #[derive(Debug, Default)]
 pub struct FrameSplitter {
     pending: Vec<u8>,
+    expected_counter: Option<u8>,
+    dropped: u64,
 }
 
 impl FrameSplitter {
@@ -50,7 +57,22 @@ impl FrameSplitter {
             .map(|c| c.try_into().expect("chunks_exact yields FRAME_LEN"))
             .collect();
         self.pending.drain(..whole);
-        frames.into_iter().map(RawSample::from_frame)
+        frames
+            .into_iter()
+            .map(RawSample::from_frame)
+            .inspect(|s| self.account(s.counter))
+    }
+
+    /// Frames lost between the ones delivered so far, as implied by counter gaps.
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
+    fn account(&mut self, counter: u8) {
+        if let Some(expected) = self.expected_counter {
+            self.dropped += u64::from(counter.wrapping_sub(expected) & COUNTER_MASK as u8);
+        }
+        self.expected_counter = Some((counter + 1) & COUNTER_MASK as u8);
     }
 }
 
@@ -152,21 +174,44 @@ mod tests {
         Converter::new(meta.cal, meta.vdd_mv)
     }
 
+    fn raw(adc: u16, range: u8) -> RawSample {
+        RawSample {
+            adc,
+            range,
+            counter: 0,
+            logic: 0,
+        }
+    }
+
+    fn frame(adc: u32, range: u32, counter: u32, logic: u32) -> [u8; FRAME_LEN] {
+        (adc | (range << RANGE_SHIFT) | (counter << COUNTER_SHIFT) | (logic << LOGIC_SHIFT))
+            .to_le_bytes()
+    }
+
     #[test]
     fn decodes_bitfields() {
-        let adc: u32 = 0x1abc;
-        let range: u32 = 3;
-        let logic: u32 = 0xa5;
-        let word = adc | (range << RANGE_SHIFT) | (logic << LOGIC_SHIFT);
-        let s = RawSample::from_frame(word.to_le_bytes());
+        let s = RawSample::from_frame(frame(0x1abc, 3, 42, 0xa5));
         assert_eq!(
             s,
             RawSample {
                 adc: 0x1abc,
                 range: 3,
+                counter: 42,
                 logic: 0xa5
             }
         );
+    }
+
+    #[test]
+    fn splitter_counts_gaps_in_the_rolling_counter() {
+        let mut sp = FrameSplitter::default();
+        let mut bytes = Vec::new();
+        for c in [61u32, 62, 63, 0, 1, 5, 6] {
+            bytes.extend_from_slice(&frame(0, 0, c, 0));
+        }
+        let n = sp.push(&bytes).count();
+        assert_eq!(n, 7);
+        assert_eq!(sp.dropped(), 3);
     }
 
     #[test]
@@ -185,11 +230,7 @@ mod tests {
         let mut conv = converter();
         for range in 0..RANGES {
             let adc = (conv.cal.o[range] / 4.0).round() as u16;
-            let ua = conv.microamps(RawSample {
-                adc,
-                range: range as u8,
-                logic: 0,
-            });
+            let ua = conv.microamps(raw(adc, range as u8));
             let full_scale_ua = 1.8 / conv.cal.r[range] * AMPS_TO_MICROAMPS;
             assert!(ua.abs() < full_scale_ua * 0.02, "range {range}: {ua} uA");
         }
@@ -198,24 +239,14 @@ mod tests {
     #[test]
     fn full_scale_of_range0_is_720_microamps_over_the_1k_shunt() {
         let mut conv = converter();
-        let ua = conv.microamps(RawSample {
-            adc: 16_383,
-            range: 0,
-            logic: 0,
-        });
+        let ua = conv.microamps(raw(16_383, 0));
         assert!((ua - 720.0).abs() < 10.0, "{ua} uA");
     }
 
     #[test]
     fn ranges_nest_in_decades() {
         let full: Vec<f64> = (0..RANGES)
-            .map(|r| {
-                converter().microamps(RawSample {
-                    adc: 16_383,
-                    range: r as u8,
-                    logic: 0,
-                })
-            })
+            .map(|r| converter().microamps(raw(16_383, r as u8)))
             .collect();
         for w in full.windows(2) {
             let ratio = w[1] / w[0];
@@ -226,32 +257,16 @@ mod tests {
     #[test]
     fn current_grows_with_adc_within_a_range() {
         let mut conv = converter();
-        let lo = conv.microamps(RawSample {
-            adc: 2000,
-            range: 2,
-            logic: 0,
-        });
-        let hi = conv.microamps(RawSample {
-            adc: 8000,
-            range: 2,
-            logic: 0,
-        });
+        let lo = conv.microamps(raw(2000, 2));
+        let hi = conv.microamps(raw(8000, 2));
         assert!(hi > lo, "{lo} !< {hi}");
     }
 
     #[test]
     fn range_switch_is_smoothed_for_three_samples() {
         let mut conv = converter();
-        let steady = conv.microamps(RawSample {
-            adc: 4000,
-            range: 1,
-            logic: 0,
-        });
-        let jump = RawSample {
-            adc: 12000,
-            range: 2,
-            logic: 0,
-        };
+        let steady = conv.microamps(raw(4000, 1));
+        let jump = raw(12000, 2);
         let raw_jump = Converter::new(conv.cal.clone(), 3300).uncalibrated_microamps(12000, 2);
         let first = conv.microamps(jump);
         assert!((first - steady).abs() < (raw_jump - steady).abs());

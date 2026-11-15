@@ -1,11 +1,21 @@
-//! Append-only sample store with a min/max/mean pyramid for fast zoomable views.
+//! Append-only sample store with an aggregation pyramid for fast zoomable views.
 
 use std::ops::Range;
 
-/// Samples per bucket at level 1; each further level groups `FANOUT` buckets.
+/// Samples per bucket at level 0; each further level groups `FANOUT` buckets.
 pub const FANOUT: usize = 64;
 
-/// Aggregate of a run of consecutive samples.
+/// How a run of consecutive samples is summarised.
+pub trait Aggregate: Copy {
+    type Sample: Copy;
+    fn empty(start: usize) -> Self;
+    fn start(&self) -> usize;
+    fn count(&self) -> usize;
+    fn add_sample(&mut self, s: Self::Sample);
+    fn add_bucket(&mut self, b: &Self);
+}
+
+/// min/max/mean of current samples.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bucket {
     pub start: usize,
@@ -16,6 +26,14 @@ pub struct Bucket {
 }
 
 impl Bucket {
+    pub fn mean(&self) -> f32 {
+        (self.sum / self.len as f64) as f32
+    }
+}
+
+impl Aggregate for Bucket {
+    type Sample = f32;
+
     fn empty(start: usize) -> Self {
         Bucket {
             start,
@@ -24,6 +42,14 @@ impl Bucket {
             max: f32::NEG_INFINITY,
             sum: 0.0,
         }
+    }
+
+    fn start(&self) -> usize {
+        self.start
+    }
+
+    fn count(&self) -> usize {
+        self.len
     }
 
     fn add_sample(&mut self, v: f32) {
@@ -39,19 +65,26 @@ impl Bucket {
         self.max = self.max.max(b.max);
         self.sum += b.sum;
     }
+}
 
-    pub fn mean(&self) -> f32 {
-        (self.sum / self.len as f64) as f32
+pub type Trace = Pyramid<Bucket>;
+
+#[derive(Debug)]
+pub struct Pyramid<A: Aggregate> {
+    raw: Vec<A::Sample>,
+    levels: Vec<Vec<A>>,
+}
+
+impl<A: Aggregate> Default for Pyramid<A> {
+    fn default() -> Self {
+        Pyramid {
+            raw: Vec::new(),
+            levels: Vec::new(),
+        }
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Trace {
-    raw: Vec<f32>,
-    levels: Vec<Vec<Bucket>>,
-}
-
-impl Trace {
+impl<A: Aggregate> Pyramid<A> {
     pub fn len(&self) -> usize {
         self.raw.len()
     }
@@ -60,7 +93,7 @@ impl Trace {
         self.raw.is_empty()
     }
 
-    pub fn push(&mut self, v: f32) {
+    pub fn push(&mut self, v: A::Sample) {
         self.raw.push(v);
         let idx = self.raw.len() - 1;
         if idx.is_multiple_of(FANOUT) {
@@ -68,13 +101,13 @@ impl Trace {
         }
         let b = self.last_bucket_mut(0);
         b.add_sample(v);
-        if b.len == FANOUT {
+        if b.count() == FANOUT {
             let closed = *b;
             self.promote(1, closed);
         }
     }
 
-    pub fn extend(&mut self, vs: impl IntoIterator<Item = f32>) {
+    pub fn extend(&mut self, vs: impl IntoIterator<Item = A::Sample>) {
         vs.into_iter().for_each(|v| self.push(v));
     }
 
@@ -82,48 +115,48 @@ impl Trace {
         if self.levels.len() == level {
             self.levels.push(Vec::new());
         }
-        self.levels[level].push(Bucket::empty(start));
+        self.levels[level].push(A::empty(start));
     }
 
-    fn last_bucket_mut(&mut self, level: usize) -> &mut Bucket {
+    fn last_bucket_mut(&mut self, level: usize) -> &mut A {
         self.levels[level]
             .last_mut()
             .expect("open_bucket ran before last_bucket_mut")
     }
 
-    fn promote(&mut self, level: usize, closed: Bucket) {
+    fn promote(&mut self, level: usize, closed: A) {
         let size = level_size(level);
-        if closed.start.is_multiple_of(size) {
-            self.open_bucket(level, closed.start);
+        if closed.start().is_multiple_of(size) {
+            self.open_bucket(level, closed.start());
         }
         let b = self.last_bucket_mut(level);
         b.add_bucket(&closed);
-        if b.len == size {
+        if b.count() == size {
             let up = *b;
             self.promote(level + 1, up);
         }
     }
 
     /// About `px` buckets covering `range`, from the coarsest level that still resolves it.
-    pub fn query(&self, range: Range<usize>, px: usize) -> Vec<Bucket> {
+    pub fn query(&self, range: Range<usize>, px: usize) -> Vec<A> {
         let range = range.start.min(self.raw.len())..range.end.min(self.raw.len());
         if range.is_empty() || px == 0 {
             return Vec::new();
         }
         let per_px = range.len().div_ceil(px).max(1);
         let level = coarsest_level_within(per_px, self.levels.len());
-        let mut out: Vec<Bucket> = Vec::with_capacity(px);
-        let flush_into = |out: &mut Vec<Bucket>, b: &Bucket| {
+        let mut out: Vec<A> = Vec::with_capacity(px);
+        let flush_into = |out: &mut Vec<A>, b: &A| {
             let slot_of = |start: usize| start.saturating_sub(range.start) / per_px;
-            let slot = slot_of(b.start);
+            let slot = slot_of(b.start());
             match out.last_mut() {
-                Some(last) if slot_of(last.start) == slot => last.add_bucket(b),
+                Some(last) if slot_of(last.start()) == slot => last.add_bucket(b),
                 _ => out.push(*b),
             }
         };
         let Some(level) = level else {
             for i in range.clone() {
-                let mut b = Bucket::empty(i);
+                let mut b = A::empty(i);
                 b.add_sample(self.raw[i]);
                 flush_into(&mut out, &b);
             }
@@ -133,7 +166,7 @@ impl Trace {
         let first = range.start / size;
         let last = range.end.div_ceil(size);
         for b in self.levels[level].iter().take(last).skip(first) {
-            if b.start + b.len <= range.start || b.start >= range.end {
+            if b.start() + b.count() <= range.start || b.start() >= range.end {
                 continue;
             }
             flush_into(&mut out, b);

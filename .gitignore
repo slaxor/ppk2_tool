@@ -1,4 +1,6 @@
 /target
 result
 result-*
+.envrc
 .direnv
+*.bundle
