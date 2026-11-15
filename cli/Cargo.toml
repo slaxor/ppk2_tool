@@ -1,0 +1,12 @@
+[package]
+name = "ppk2_tool-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ppk2_tool"
+path = "src/main.rs"
+
+[dependencies]
+ppk2_tool = { path = "../lib" }
