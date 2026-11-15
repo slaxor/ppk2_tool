@@ -31,7 +31,9 @@ fn run(port: String, ctl: Receiver<Control>, ev: Sender<Event>, ctx: egui::Conte
     let mut dev = match Ppk2::open(&port, PowerMode::Source) {
         Ok(d) => d,
         Err(e) => {
-            let _ = ev.send(Event::Status(format!("{port}: {e}")));
+            let msg = format!("{port:?}: {e}");
+            eprintln!("{msg}");
+            let _ = ev.send(Event::Status(msg));
             return;
         }
     };

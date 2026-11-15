@@ -114,9 +114,10 @@ impl Trace {
         let level = coarsest_level_within(per_px, self.levels.len());
         let mut out: Vec<Bucket> = Vec::with_capacity(px);
         let flush_into = |out: &mut Vec<Bucket>, b: &Bucket| {
-            let slot = (b.start - range.start) / per_px;
+            let slot_of = |start: usize| start.saturating_sub(range.start) / per_px;
+            let slot = slot_of(b.start);
             match out.last_mut() {
-                Some(last) if (last.start - range.start) / per_px == slot => last.add_bucket(b),
+                Some(last) if slot_of(last.start) == slot => last.add_bucket(b),
                 _ => out.push(*b),
             }
         };
@@ -202,6 +203,13 @@ mod tests {
         let out = t.query(0..n, 7);
         let total: f64 = out.iter().map(|b| b.sum).sum();
         assert_eq!(total, (0..n).map(|i| i as f64).sum::<f64>());
+    }
+
+    #[test]
+    fn query_starting_inside_a_coarse_bucket_does_not_panic() {
+        let t = ramp(FANOUT * FANOUT * 4);
+        let out = t.query(FANOUT * FANOUT + 7..FANOUT * FANOUT * 4, 3);
+        assert!(!out.is_empty());
     }
 
     #[test]
