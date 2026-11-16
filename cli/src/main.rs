@@ -9,7 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use clap::{Parser, Subcommand, ValueEnum};
 use ppk2_tool::measure::SAMPLES_PER_SECOND;
 use ppk2_tool::settings::socket_path;
-use ppk2_tool::{Folder, Header, PowerMode, Ppk2, Writer, find_ports};
+use ppk2_tool::{
+    Folder, Header, PowerMode, Ppk2, RegulatorCalibration, Settings, Writer, find_ports, serial_of,
+};
 
 #[derive(Parser)]
 #[command(version, about = "Nordic PPK2 from the command line")]
@@ -61,6 +63,15 @@ enum Cmd {
         fold: u32,
         file: PathBuf,
     },
+    /// Measure the source regulator at two voltages with a multimeter and store the correction
+    CalibrateVoltage {
+        /// Lower calibration point in mV
+        #[arg(long, default_value_t = 1800)]
+        low: u16,
+        /// Upper calibration point in mV; keep it below what anything on VOUT tolerates
+        #[arg(long, default_value_t = 3300)]
+        high: u16,
+    },
     /// Own the device and serve clients (the GUI) over a unix socket
     Serve {
         /// Socket path; default $XDG_RUNTIME_DIR/ppk2_tool.sock
@@ -86,7 +97,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let spool = spool.unwrap_or_else(|| socket.with_extension(""));
         return serve::run(port, socket, spool);
     }
-    let mut dev = Ppk2::open(&port, cli.mode.into(), cli.mv)?;
+    if let Cmd::CalibrateVoltage { low, high } = cli.cmd {
+        return calibrate_voltage(&port, low, high);
+    }
+    let regulator =
+        RegulatorCalibration::load(&serial_of(&port).unwrap_or_default())?.command_for(cli.mv);
+    let mut dev = Ppk2::open(&port, cli.mode.into(), regulator)?;
     eprintln!(
         "{port}: hw {}, fw calibrated: {}",
         dev.metadata.hw, dev.metadata.calibrated
@@ -98,7 +114,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::Stream => stream(&mut dev, cli.seconds),
         Cmd::Probe => probe(&mut dev, cli.seconds.unwrap_or(2)),
         Cmd::Record { fold, file } => record(&mut dev, cli.seconds, *fold, file),
-        Cmd::Serve { .. } => unreachable!("handled before the device was opened"),
+        Cmd::Serve { .. } | Cmd::CalibrateVoltage { .. } => {
+            unreachable!("handled before the device was opened")
+        }
     };
     dev.stop_measuring()?;
     dev.power(false)?;
@@ -139,6 +157,54 @@ fn stream(dev: &mut Ppk2, seconds: Option<u64>) -> Result<(), Box<dyn std::error
         }
     }
     Ok(())
+}
+
+fn calibrate_voltage(port: &str, low: u16, high: u16) -> Result<(), Box<dyn std::error::Error>> {
+    if std::os::unix::net::UnixStream::connect(socket_path()).is_ok() {
+        return Err("a ppk2_tool daemon is running; quit it (and the GUI) first".into());
+    }
+    let serial = serial_of(port).ok_or("cannot tell the PPK2's serial number from the port")?;
+    let wanted = Settings::load()?.millivolts;
+    eprintln!(
+        "VOUT will go to {low} mV and then {high} mV. Leave nothing on VOUT that can't take {high} mV;
+         a resistor or a multimeter alone is fine. Measure between VOUT and GND."
+    );
+    let mut dev = Ppk2::open(port, PowerMode::Source, low)?;
+    dev.power(true)?;
+    let result = (|| {
+        let low_mv = read_voltage(&mut dev, low)?;
+        let high_mv = read_voltage(&mut dev, high)?;
+        Ok::<_, Box<dyn std::error::Error>>(RegulatorCalibration::from_points(
+            (low, low_mv),
+            (high, high_mv),
+        )?)
+    })();
+    dev.power(false)?;
+    let cal = result?;
+    cal.save(&serial)?;
+    eprintln!(
+        "gain {:.5}, offset {:+.1} mV; {wanted} mV is now sent as {} mV. Saved to {}",
+        cal.gain,
+        cal.offset_mv,
+        cal.command_for(wanted),
+        RegulatorCalibration::path(&serial).display()
+    );
+    Ok(())
+}
+
+fn read_voltage(dev: &mut Ppk2, command_mv: u16) -> Result<f64, Box<dyn std::error::Error>> {
+    dev.set_source_voltage(command_mv)?;
+    eprint!("regulator at {command_mv} mV; multimeter reads (V or mV): ");
+    std::io::stderr().flush()?;
+    let mut line = String::new();
+    std::io::stdin().read_line(&mut line)?;
+    parse_reading(&line).ok_or_else(|| format!("not a voltage: {:?}", line.trim()).into())
+}
+
+/// "3.267", "3,267" and "3267" all mean 3267 mV.
+fn parse_reading(text: &str) -> Option<f64> {
+    let value: f64 = text.trim().replace(',', ".").parse().ok()?;
+    Some(if value < 10.0 { value * 1000.0 } else { value })
 }
 
 #[derive(Default)]
@@ -230,4 +296,23 @@ fn record(
     }
     writer.sync()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readings_in_volts_or_millivolts() {
+        let cases = [
+            ("3.267\n", Some(3267.0)),
+            ("3,267", Some(3267.0)),
+            ("3267", Some(3267.0)),
+            (" 1.8 ", Some(1800.0)),
+            ("abc", None),
+        ];
+        for (text, want) in cases {
+            assert_eq!(parse_reading(text).map(f64::round), want, "{text:?}");
+        }
+    }
 }

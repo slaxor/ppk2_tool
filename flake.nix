@@ -102,12 +102,16 @@
                 millivolts = 3300;
                 fold = 10;
               };
-              description = "Initial daemon settings; the daemon rewrites this file when they change in the GUI.";
+              description = ''
+                Starting settings, written to ~/.config/ppk2_tool/defaults.toml. Once the GUI
+                or `ppk2_tool calibrate-voltage` has saved ~/.config/ppk2_tool/settings.toml,
+                that file wins.
+              '';
             };
           };
           config = lib.mkIf cfg.enable {
             home.packages = [ cfg.package ];
-            xdg.configFile."ppk2_tool/settings.toml" = lib.mkIf (cfg.settings != { }) {
+            xdg.configFile."ppk2_tool/defaults.toml" = lib.mkIf (cfg.settings != { }) {
               source = tomlFormat.generate "ppk2_tool-settings.toml" cfg.settings;
             };
           };

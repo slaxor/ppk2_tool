@@ -1,6 +1,7 @@
 //! Serial transport to a PPK2.
 
 use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serialport::SerialPort;
@@ -32,6 +33,25 @@ pub struct Ppk2 {
     splitter: FrameSplitter,
     converter: Converter,
     millivolts: u16,
+}
+
+/// Serial number of the PPK2 behind `port` (a by-id link or the tty it points to).
+pub fn serial_of(port: &str) -> Option<String> {
+    let from_name = |path: &Path| {
+        let name = path.file_name()?.to_str()?;
+        let rest = name.strip_prefix(PPK2_PREFIX)?;
+        Some(rest.split('-').next()?.to_owned())
+    };
+    if let Some(serial) = from_name(Path::new(port)) {
+        return Some(serial);
+    }
+    let target = std::fs::canonicalize(port).ok()?;
+    std::fs::read_dir(BY_ID_DIR)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| std::fs::canonicalize(p).ok().as_ref() == Some(&target))
+        .and_then(|p| from_name(&p))
 }
 
 /// Measurement ports of all attached PPK2s, via the udev by-id symlinks.
@@ -214,5 +234,18 @@ mod tests {
     fn blob_waits_for_its_own_end() {
         assert_eq!(complete_blob("END\nCalibrated: 0\nR0: 1.0\n"), None);
         assert_eq!(complete_blob(""), None);
+    }
+}
+
+#[cfg(test)]
+mod serial_tests {
+    use super::*;
+
+    #[test]
+    fn serial_from_by_id_name() {
+        assert_eq!(
+            serial_of("/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_DA588140714D-if01"),
+            Some("DA588140714D".to_owned())
+        );
     }
 }

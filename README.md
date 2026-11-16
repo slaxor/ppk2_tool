@@ -22,7 +22,7 @@ inputs.ppk2_tool.url = "github:slaxor/ppk2_tool";
 # home-manager
 imports = [ inputs.ppk2_tool.homeManagerModules.default ];
 programs.ppk2-tool.enable = true;
-programs.ppk2-tool.settings = { fold = 10; millivolts = 3300; };   # optional
+programs.ppk2-tool.settings = { fold = 10; millivolts = 3300; };   # optional, becomes defaults.toml
 
 # NixOS: dialout access and no USB autosuspend for the PPK2
 imports = [ inputs.ppk2_tool.nixosModules.default ];
@@ -47,6 +47,20 @@ normal drag pans, scroll zooms; `fit all` shows the whole buffer.
 The daemon keeps the current measurement in `$XDG_RUNTIME_DIR/ppk2_tool/`
 (tmpfs, so RAM; `--spool DIR` for disk). Nothing is written elsewhere until
 you press save.
+
+## Calibrating the source voltage
+
+The PPK2's regulator can be a percent or so off (3300 mV set, 3.267 V measured
+on one unit). With a multimeter on VOUT:
+
+    ppk2_tool calibrate-voltage            # points at 1800 and 3300 mV
+    ppk2_tool calibrate-voltage --high 5000
+
+It asks for the reading at each point (`3.267`, `3,267` or `3267`), fits
+output = gain × command + offset and stores it per unit in
+`$XDG_CONFIG_HOME/ppk2_tool/calibration/<serial>.toml`. From then on the
+voltage you set is the voltage on VOUT. The daemon reads it at start, so
+restart the GUI/daemon after calibrating.
 
 ## Long runs on a small machine
 

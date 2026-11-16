@@ -37,6 +37,7 @@ struct App {
     power: bool,
     measuring: bool,
     keep_daemon: bool,
+    setting_text: std::collections::HashMap<Setting, String>,
     daemon_warning: Option<String>,
     save_path: String,
     last_status: Instant,
@@ -52,9 +53,9 @@ struct App {
 impl App {
     fn new(arg: Option<PathBuf>, ctx: egui::Context) -> Self {
         let session = match arg {
-            Some(p) => Session::file(p, ctx)
+            Some(p) => Session::file(p, ctx.clone())
                 .unwrap_or_else(|e| fatal(&format!("cannot open recording: {e}"))),
-            None => Session::daemon(&socket_path(), ctx)
+            None => Session::daemon(&socket_path(), ctx.clone())
                 .unwrap_or_else(|e| fatal(&format!("no daemon and could not start one: {e}"))),
         };
         let mut app = App {
@@ -70,6 +71,7 @@ impl App {
             power: false,
             measuring: false,
             keep_daemon: false,
+            setting_text: std::collections::HashMap::new(),
             daemon_warning: None,
             save_path: String::new(),
             last_status: Instant::now() - STATUS_EVERY,
@@ -81,11 +83,11 @@ impl App {
             hover_s: None,
             view: Stats::of(&[]),
         };
-        app.poll_status();
+        app.poll_status(&ctx);
         app
     }
 
-    fn poll_status(&mut self) {
+    fn poll_status(&mut self, ctx: &egui::Context) {
         if !self.session.is_live() || self.last_status.elapsed() < STATUS_EVERY {
             return;
         }
@@ -95,11 +97,14 @@ impl App {
                 self.status = format!("{} hw {}", s.port, s.hw);
                 self.daemon_warning = client::stale_daemon(&s);
                 self.mode = s.mode;
-                self.voltage_mv = s.millivolts;
+                let editing = ctx.dragged_id().is_some() || ctx.memory(|m| m.focused().is_some());
+                if !editing {
+                    self.voltage_mv = s.millivolts;
+                }
                 self.power = s.power;
                 self.measuring = s.measuring;
                 self.dropped = s.dropped;
-                if s.fold != self.fold {
+                if s.fold != self.fold && !editing {
                     self.fold = s.fold;
                     self.seconds_per_record = s.fold as f64 / SAMPLES_PER_SECOND as f64;
                 }
@@ -202,27 +207,65 @@ impl App {
                 fold: None,
             });
         }
-        let slider = egui::Slider::new(&mut self.voltage_mv, 800..=5000).suffix(" mV");
-        if ui
-            .add_enabled(self.mode == PowerMode::Source, slider)
-            .drag_stopped()
-        {
+        let source = self.mode == PowerMode::Source;
+        let mut voltage = u32::from(self.voltage_mv);
+        if let Some(mv) = self.setting_row(ui, Setting::Millivolts, &mut voltage, source) {
             self.send(Request::Set {
                 mode: None,
-                millivolts: Some(self.voltage_mv),
+                millivolts: Some(mv as u16),
                 fold: None,
             });
         }
-        let fold = egui::Slider::new(&mut self.fold, 1..=10_000)
-            .logarithmic(true)
-            .prefix("fold ");
-        if ui.add_enabled(!self.measuring, fold).drag_stopped() {
+        self.voltage_mv = voltage as u16;
+        let mut fold = self.fold;
+        if let Some(fold) = self.setting_row(ui, Setting::Fold, &mut fold, !self.measuring) {
             self.send(Request::Set {
                 mode: None,
                 millivolts: None,
-                fold: Some(self.fold),
+                fold: Some(fold),
             });
         }
+        self.fold = fold;
+    }
+
+    /// Slider plus a text field that only takes effect on Enter or leaving the field,
+    /// so the status poll can't overwrite a value while it is being typed or dragged.
+    fn setting_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        setting: Setting,
+        value: &mut u32,
+        enabled: bool,
+    ) -> Option<u32> {
+        let range = setting.range();
+        let mut committed = None;
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.horizontal(|ui| {
+                let slider = egui::Slider::new(value, range.clone())
+                    .logarithmic(setting.logarithmic())
+                    .show_value(false);
+                if ui.add(slider).drag_stopped() {
+                    committed = Some(*value);
+                }
+                let text = self.setting_text.entry(setting).or_default();
+                let field = ui.add(egui::TextEdit::singleline(text).desired_width(56.0));
+                ui.label(setting.unit());
+                if !field.has_focus() && !field.lost_focus() {
+                    *text = value.to_string();
+                    return;
+                }
+                if field.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    match text.trim().parse::<u32>() {
+                        Ok(v) if range.contains(&v) => {
+                            *value = v;
+                            committed = Some(v);
+                        }
+                        _ => *text = value.to_string(),
+                    }
+                }
+            });
+        });
+        committed
     }
 
     fn action_buttons(&mut self, ui: &mut egui::Ui) {
@@ -479,7 +522,7 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain_events();
-        self.poll_status();
+        self.poll_status(&ui.ctx().clone());
         egui::Panel::left("side")
             .default_size(280.0)
             .show(ui, |ui| self.side_panel(ui));
@@ -489,6 +532,32 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.session.shutdown(!self.keep_daemon);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Setting {
+    Millivolts,
+    Fold,
+}
+
+impl Setting {
+    fn range(self) -> std::ops::RangeInclusive<u32> {
+        match self {
+            Setting::Millivolts => 800..=5000,
+            Setting::Fold => 1..=10_000,
+        }
+    }
+
+    fn logarithmic(self) -> bool {
+        self == Setting::Fold
+    }
+
+    fn unit(self) -> &'static str {
+        match self {
+            Setting::Millivolts => "mV",
+            Setting::Fold => "samples/record",
+        }
     }
 }
 

@@ -10,7 +10,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ppk2_tool::measure::SAMPLES_PER_SECOND;
 use ppk2_tool::proto::{self, Frame, Reply, Request, Status};
-use ppk2_tool::{Error, Folder, Header, PowerMode, Ppk2, Reader, Settings, Writer};
+use ppk2_tool::{
+    Error, Folder, Header, PowerMode, Ppk2, Reader, RegulatorCalibration, Settings, Writer,
+    serial_of,
+};
 
 const SYNC_EVERY: Duration = Duration::from_secs(1);
 const TAIL_POLL: Duration = Duration::from_millis(100);
@@ -28,6 +31,7 @@ struct State {
     generation: u64,
     exe: String,
     exe_mtime_ms: u64,
+    calibration: RegulatorCalibration,
 }
 
 impl State {
@@ -79,7 +83,12 @@ pub fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load()?;
     std::fs::create_dir_all(&spool_dir)?;
-    let dev = Ppk2::open(&port, settings.mode, settings.millivolts)?;
+    let calibration = RegulatorCalibration::load(&serial_of(&port).unwrap_or_default())?;
+    let dev = Ppk2::open(
+        &port,
+        settings.mode,
+        calibration.command_for(settings.millivolts),
+    )?;
     let exe = std::env::current_exe()?;
     let state = Arc::new(Mutex::new(State {
         port: port.clone(),
@@ -94,6 +103,7 @@ pub fn run(
         generation: 0,
         exe_mtime_ms: proto::mtime_ms(&exe),
         exe: exe.display().to_string(),
+        calibration,
     }));
     let (jobs_tx, jobs_rx) = std::sync::mpsc::channel::<Job>();
     let listener = bind(&socket)?;
@@ -213,7 +223,8 @@ fn apply(
             persist(state, |s| s.mode = mode)
         }
         DevCmd::SetVoltage(mv) => {
-            dev.set_source_voltage(mv)?;
+            let regulator = with_state(state, |st| st.calibration.command_for(mv));
+            dev.set_source_voltage(regulator)?;
             persist(state, |s| s.millivolts = mv)
         }
         DevCmd::SetFold(fold) => {

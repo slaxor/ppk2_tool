@@ -11,12 +11,12 @@ pub mod store;
 pub mod trace;
 
 pub use cmd::{Command, PowerMode};
-pub use device::{Ppk2, Sample, find_ports};
+pub use device::{Ppk2, Sample, find_ports, serial_of};
 pub use measure::{Converter, RawSample};
 pub use metadata::Metadata;
 pub use proto::{Reply, Request, Status};
 pub use record::{Folder, Record, RecordBucket};
-pub use settings::Settings;
+pub use settings::{RegulatorCalibration, Settings};
 pub use store::{Header, Reader, Writer};
 pub use trace::{Aggregate, Bucket, Pyramid, Trace};
 
