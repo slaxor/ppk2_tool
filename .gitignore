@@ -4,3 +4,5 @@ result-*
 .envrc
 .direnv
 *.bundle
+*.orig
+*.rej

@@ -26,6 +26,9 @@ struct Cli {
     /// Stop after this many seconds; run until Ctrl-C when omitted
     #[arg(long, global = true)]
     seconds: Option<u64>,
+    /// Seconds between switching the DUT on and the first sample; 0 to capture the switch-on
+    #[arg(long, global = true, default_value_t = 0.5)]
+    warmup: f64,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -89,6 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dev.metadata.hw, dev.metadata.calibrated
     );
     dev.power(true)?;
+    std::thread::sleep(Duration::from_secs_f64(cli.warmup.max(0.0)));
     dev.start_measuring()?;
     let result = match &cli.cmd {
         Cmd::Stream => stream(&mut dev, cli.seconds),

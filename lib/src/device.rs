@@ -92,7 +92,6 @@ impl Ppk2 {
                 self.power(false)?;
                 self.set_power_mode(mode)?;
                 self.set_source_voltage(self.millivolts)
-  
             }
             PowerMode::Ampere => {
                 self.set_power_mode(mode)?;
