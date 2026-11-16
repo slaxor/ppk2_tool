@@ -1,7 +1,8 @@
 //! Serial command opcodes understood by the PPK2 firmware.
 
 /// Measurement mode: source meter feeds the DUT, ampere meter sits in series.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PowerMode {
     Source,
     Ampere,

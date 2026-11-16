@@ -4,7 +4,9 @@ pub mod cmd;
 pub mod device;
 pub mod measure;
 pub mod metadata;
+pub mod proto;
 pub mod record;
+pub mod settings;
 pub mod store;
 pub mod trace;
 
@@ -12,7 +14,9 @@ pub use cmd::{Command, PowerMode};
 pub use device::{Ppk2, Sample, find_ports};
 pub use measure::{Converter, RawSample};
 pub use metadata::Metadata;
+pub use proto::{Reply, Request, Status};
 pub use record::{Folder, Record, RecordBucket};
+pub use settings::Settings;
 pub use store::{Header, Reader, Writer};
 pub use trace::{Aggregate, Bucket, Pyramid, Trace};
 
@@ -32,4 +36,8 @@ pub enum Error {
     VoltageOutOfRange(u16),
     #[error("not a ppk2_tool recording: {0:?}")]
     BadRecording(String),
+    #[error("settings: {0}")]
+    BadSettings(String),
+    #[error("protocol: {0}")]
+    Protocol(String),
 }

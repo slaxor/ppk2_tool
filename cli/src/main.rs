@@ -1,3 +1,5 @@
+mod serve;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -6,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use ppk2_tool::measure::SAMPLES_PER_SECOND;
+use ppk2_tool::settings::socket_path;
 use ppk2_tool::{Folder, Header, PowerMode, Ppk2, Writer, find_ports};
 
 #[derive(Parser)]
@@ -53,6 +56,15 @@ enum Cmd {
         fold: u32,
         file: PathBuf,
     },
+    /// Own the device and serve clients (the GUI) over a unix socket
+    Serve {
+        /// Socket path; default $XDG_RUNTIME_DIR/ppk2_tool.sock
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        /// Where the current buffer lives; default $XDG_RUNTIME_DIR/ppk2_tool (tmpfs)
+        #[arg(long)]
+        spool: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,6 +76,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .next()
             .ok_or("no PPK2 found; pass --port")?,
     };
+    if let Cmd::Serve { socket, spool } = cli.cmd {
+        let socket = socket.unwrap_or_else(socket_path);
+        let spool = spool.unwrap_or_else(|| socket.with_extension(""));
+        return serve::run(port, socket, spool);
+    }
     let mut dev = Ppk2::open(&port, cli.mode.into())?;
     eprintln!(
         "{port}: hw {}, fw calibrated: {}",
@@ -77,6 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = match &cli.cmd {
         Cmd::Stream => stream(&mut dev, cli.seconds),
         Cmd::Record { fold, file } => record(&mut dev, cli.seconds, *fold, file),
+        Cmd::Serve { .. } => unreachable!("handled before the device was opened"),
     };
     dev.stop_measuring()?;
     dev.power(false)?;

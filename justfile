@@ -18,7 +18,11 @@ fix:
     cargo fmt --all
 
 run *args:
+    cargo build --workspace
+    target/debug/ppk2_tool-gui {{args}}
+
+cli *args:
     cargo run -p ppk2_tool-cli -- {{args}}
 
-gui *args:
-    cargo run -p ppk2_tool-gui -- {{args}}
+serve *args:
+    cargo run -p ppk2_tool-cli -- serve {{args}}

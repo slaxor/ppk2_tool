@@ -58,11 +58,18 @@ impl Writer {
     pub fn create(path: &Path, header: &Header) -> Result<Self, Error> {
         let mut out = BufWriter::new(File::create(path)?);
         out.write_all(header.to_line().as_bytes())?;
+        out.flush()?;
         Ok(Writer { out })
     }
 
     pub fn append(&mut self, r: Record) -> Result<(), Error> {
         self.out.write_all(&r.to_bytes())?;
+        Ok(())
+    }
+
+    /// Hand buffered records to the OS so readers of the file see them now.
+    pub fn flush(&mut self) -> Result<(), Error> {
+        self.out.flush()?;
         Ok(())
     }
 
