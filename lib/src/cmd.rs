@@ -1,6 +1,8 @@
 //! Serial command opcodes understood by the PPK2 firmware.
 
 /// Measurement mode: source meter feeds the DUT, ampere meter sits in series.
+/// On the wire the ampere meter is 1 and the source meter 2 (Nordic calls it SMU mode);
+/// `GetMetadata` reports the active one as `mode:`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PowerMode {
@@ -26,8 +28,8 @@ impl Command {
     pub fn to_bytes(self) -> Vec<u8> {
         match self {
             Command::GetMetadata => vec![0x19],
-            Command::SetPowerMode(PowerMode::Source) => vec![0x11, 0x01],
-            Command::SetPowerMode(PowerMode::Ampere) => vec![0x11, 0x02],
+            Command::SetPowerMode(PowerMode::Ampere) => vec![0x11, 0x01],
+            Command::SetPowerMode(PowerMode::Source) => vec![0x11, 0x02],
             Command::RegulatorSet { millivolts } => {
                 let [hi, lo] = millivolts.to_be_bytes();
                 vec![0x0d, hi, lo]
@@ -50,8 +52,8 @@ mod tests {
     fn encodes_like_the_reference_implementation() {
         let cases = [
             (Command::GetMetadata, vec![0x19]),
-            (Command::SetPowerMode(PowerMode::Source), vec![0x11, 0x01]),
-            (Command::SetPowerMode(PowerMode::Ampere), vec![0x11, 0x02]),
+            (Command::SetPowerMode(PowerMode::Ampere), vec![0x11, 0x01]),
+            (Command::SetPowerMode(PowerMode::Source), vec![0x11, 0x02]),
             (
                 Command::RegulatorSet { millivolts: 3300 },
                 vec![0x0d, 0x0c, 0xe4],

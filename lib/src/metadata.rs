@@ -102,7 +102,7 @@ mod tests {
         assert!(!meta.calibrated);
         assert_eq!(meta.vdd_mv, 3300);
         assert_eq!(meta.hw, 24455);
-        assert_eq!(meta.mode, 1);
+        assert_eq!(meta.mode, 1, "metadata was taken in ampere-meter mode");
         assert_eq!(meta.ia, 56);
         assert_eq!(meta.cal.r[0], 997.7660522460938);
         assert_eq!(meta.cal.r[4], 0.056569237262010574);

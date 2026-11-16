@@ -222,8 +222,12 @@ impl App {
     fn action_buttons(&mut self, ui: &mut egui::Ui) {
         let size = egui::vec2(ui.available_width(), 28.0);
         let power_label = if self.power { "power on" } else { "power off" };
+        let power = egui::Button::selectable(self.power, power_label);
         if ui
-            .add_sized(size, egui::Button::selectable(self.power, power_label))
+            .add_enabled_ui(self.mode == PowerMode::Source, |ui| {
+                ui.add_sized(size, power)
+            })
+            .inner
             .clicked()
         {
             self.power = !self.power;

@@ -201,7 +201,19 @@ fn apply(
 ) -> Result<(), Error> {
     match cmd {
         DevCmd::SetMode(mode) => {
-            dev.set_power_mode(mode)?;
+            let running = match mode {
+                PowerMode::Source => {
+                    dev.power(false)?;
+                    dev.set_power_mode(mode)?;
+                    false
+                }
+                PowerMode::Ampere => {
+                    dev.set_power_mode(mode)?;
+                    dev.power(true)?;
+                    true
+                }
+            };
+            with_state(state, |st| st.power = running);
             persist(state, |s| s.mode = mode)
         }
         DevCmd::SetVoltage(mv) => {
