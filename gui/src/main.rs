@@ -12,6 +12,17 @@ use ppk2_tool::settings::socket_path;
 use ppk2_tool::{PowerMode, Pyramid, RecordBucket};
 
 const LOGIC_BITS: usize = 8;
+/// Wire colours of Nordic's logic-port cable, D0 to D7.
+const LANE_COLOURS: [egui::Color32; LOGIC_BITS] = [
+    egui::Color32::from_rgb(60, 110, 230),
+    egui::Color32::from_rgb(240, 205, 40),
+    egui::Color32::from_rgb(50, 165, 70),
+    egui::Color32::from_rgb(145, 80, 215),
+    egui::Color32::from_rgb(160, 160, 160),
+    egui::Color32::from_rgb(250, 125, 40),
+    egui::Color32::from_rgb(160, 100, 60),
+    egui::Color32::from_rgb(240, 240, 240),
+];
 const LANE_PITCH: f64 = 1.5;
 const STATUS_EVERY: Duration = Duration::from_millis(500);
 
@@ -493,7 +504,7 @@ impl App {
 
     fn draw_logic(&self, p: &mut egui_plot::PlotUi, buckets: &[RecordBucket], label_x: f64) {
         let xs: Vec<f64> = buckets.iter().map(|b| self.mid_s(b)).collect();
-        for bit in 0..LOGIC_BITS {
+        for (bit, &colour) in LANE_COLOURS.iter().enumerate() {
             let base = (LOGIC_BITS - 1 - bit) as f64 * LANE_PITCH;
             let level = |mask: u8| (mask >> bit) & 1;
             let highs: Vec<f64> = buckets
@@ -507,14 +518,21 @@ impl App {
             let line: Vec<[f64; 2]> = xs.iter().zip(&highs).map(|(&x, &y)| [x, y]).collect();
             p.add(
                 FilledArea::new(format!("D{bit} toggling"), &xs, &lows, &highs)
-                    .fill_color(egui::Color32::from_rgba_unmultiplied(255, 180, 60, 90)),
+                    .fill_color(colour.gamma_multiply(0.35)),
             );
-            p.line(Line::new(format!("D{bit}"), PlotPoints::new(line)).width(1.0));
-            p.add(Text::new(
-                format!("D{bit} label"),
-                egui_plot::PlotPoint::new(label_x, base + 0.5),
-                format!("D{bit}"),
-            ));
+            p.line(
+                Line::new(format!("D{bit}"), PlotPoints::new(line))
+                    .color(colour)
+                    .width(1.5),
+            );
+            p.add(
+                Text::new(
+                    format!("D{bit} label"),
+                    egui_plot::PlotPoint::new(label_x, base + 0.5),
+                    egui::RichText::new(format!("D{bit}")).strong(),
+                )
+                .color(colour),
+            );
         }
     }
 }
