@@ -3,8 +3,36 @@
 Host-side tooling for Nordic's Power Profiler Kit II, without nRF Connect.
 
 - `lib/` — driver (CDC protocol, calibration), record folding, recording files, daemon protocol
-- `cli/` — `ppk2_tool`: `serve` (daemon), `record` (headless to file), `stream` (stdout)
+- `cli/` — `ppk2_tool`: `serve` (daemon), `record` (headless to file), `stream` (stdout),
+  `probe` (how a few seconds of samples spread over the five ranges)
 - `gui/` — `ppk2_tool-gui`: egui client; live via the daemon, or viewing a recording
+
+## Install
+
+Binaries for every push to master are on the
+[`latest` pre-release](https://github.com/slaxor/ppk2_tool/releases/tag/latest)
+(x86_64/aarch64 Linux, Apple Silicon/Intel macOS); tagged `v*` pushes become
+proper releases. Windows is out: the daemon talks over unix sockets.
+
+NixOS / home-manager, as a flake input:
+
+```nix
+inputs.ppk2_tool.url = "github:slaxor/ppk2_tool";
+
+# home-manager
+imports = [ inputs.ppk2_tool.homeManagerModules.default ];
+programs.ppk2-tool.enable = true;
+programs.ppk2-tool.settings = { fold = 10; millivolts = 3300; };   # optional
+
+# NixOS: dialout access and no USB autosuspend for the PPK2
+imports = [ inputs.ppk2_tool.nixosModules.default ];
+hardware.ppk2.enable = true;
+users.users.<you>.extraGroups = [ "dialout" ];
+```
+
+Or just `nix run github:slaxor/ppk2_tool` (GUI) and
+`nix run github:slaxor/ppk2_tool#cli -- record --fold 1000 night.ppk2`.
+Builds are pushed to the `slaxor` cachix cache by CI.
 
 ## Everyday use
 

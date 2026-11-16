@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=ppk2_tool
+Comment=Power Profiler Kit II
+Exec=ppk2_tool-gui
+Terminal=false
+Categories=Development;Electronics;

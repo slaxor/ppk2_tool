@@ -37,6 +37,7 @@ struct App {
     power: bool,
     measuring: bool,
     keep_daemon: bool,
+    daemon_warning: Option<String>,
     save_path: String,
     last_status: Instant,
     follow: bool,
@@ -69,6 +70,7 @@ impl App {
             power: false,
             measuring: false,
             keep_daemon: false,
+            daemon_warning: None,
             save_path: String::new(),
             last_status: Instant::now() - STATUS_EVERY,
             follow: true,
@@ -91,6 +93,7 @@ impl App {
         match self.session.status() {
             Ok(s) => {
                 self.status = format!("{} hw {}", s.port, s.hw);
+                self.daemon_warning = client::stale_daemon(&s);
                 self.mode = s.mode;
                 self.voltage_mv = s.millivolts;
                 self.power = s.power;
@@ -149,6 +152,9 @@ impl App {
                     egui::Color32::RED,
                     format!("{} frames dropped", self.dropped),
                 );
+            }
+            if let Some(w) = &self.daemon_warning {
+                ui.colored_label(egui::Color32::RED, w);
             }
             let end_s = self.trace.len() as f64 * self.seconds_per_record;
             ui.label(

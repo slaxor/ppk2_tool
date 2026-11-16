@@ -57,6 +57,20 @@ pub struct Status {
     pub records: usize,
     pub dropped: u64,
     pub started_unix_ms: Option<u64>,
+    /// The daemon's own executable and its modification time when it started,
+    /// so a client can tell it is talking to an outdated binary.
+    pub exe: String,
+    pub exe_mtime_ms: u64,
+}
+
+/// Modification time of a file in Unix milliseconds, 0 if unknown.
+pub fn mtime_ms(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

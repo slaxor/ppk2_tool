@@ -22,6 +22,7 @@ const METADATA_START: &str = "Calibrated:";
 pub struct Sample {
     pub microamps: f32,
     pub logic: u8,
+    pub range: u8,
 }
 
 /// An open PPK2 with its calibration loaded.
@@ -30,6 +31,7 @@ pub struct Ppk2 {
     pub metadata: Metadata,
     splitter: FrameSplitter,
     converter: Converter,
+    millivolts: u16,
 }
 
 /// Measurement ports of all attached PPK2s, via the udev by-id symlinks.
@@ -55,8 +57,9 @@ pub fn find_ports() -> Result<Vec<String>, Error> {
 }
 
 impl Ppk2 {
-    /// Open `path`, fetch metadata, select `mode`.
-    pub fn open(path: &str, mode: PowerMode) -> Result<Self, Error> {
+    /// Open `path` and bring it up the way Nordic's app does: metadata, regulator,
+    /// then the measurement mode (see `enter_mode`).
+    pub fn open(path: &str, mode: PowerMode, millivolts: u16) -> Result<Self, Error> {
         let mut port = serialport::new(path, 9600)
             .timeout(Duration::from_millis(50))
             .open()?;
@@ -69,9 +72,33 @@ impl Ppk2 {
             metadata,
             splitter: FrameSplitter::default(),
             converter,
+            millivolts,
         };
-        dev.send(Command::SetPowerMode(mode))?;
+        dev.set_source_voltage(millivolts)?;
+        let already_there = dev.metadata.mode == u32::from(mode.wire_code());
+        match (already_there, mode) {
+            (true, PowerMode::Source) => {}
+            (true, PowerMode::Ampere) => dev.power(true)?,
+            (false, _) => dev.enter_mode(mode)?,
+        }
         Ok(dev)
+    }
+
+    /// Switch modes in the order Nordic's app uses: the source meter is entered with the
+    /// output off, the ampere meter with the DUT path closed, since it only sits in series.
+    pub fn enter_mode(&mut self, mode: PowerMode) -> Result<(), Error> {
+        match mode {
+            PowerMode::Source => {
+                self.power(false)?;
+                self.set_power_mode(mode)?;
+                self.set_source_voltage(self.millivolts)
+  
+            }
+            PowerMode::Ampere => {
+                self.set_power_mode(mode)?;
+                self.power(true)
+            }
+        }
     }
 
     pub fn send(&mut self, cmd: Command) -> Result<(), Error> {
@@ -91,6 +118,7 @@ impl Ppk2 {
         }
         self.send(Command::RegulatorSet { millivolts })?;
         self.converter.set_source_millivolts(millivolts);
+        self.millivolts = millivolts;
         Ok(())
     }
 
@@ -124,6 +152,7 @@ impl Ppk2 {
         out.extend(frames.into_iter().map(|s| Sample {
             microamps: self.converter.microamps(s) as f32,
             logic: s.logic,
+            range: s.range,
         }));
         Ok(out.len() - before)
     }

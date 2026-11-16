@@ -1,0 +1,68 @@
+name: release
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest,     target: aarch64-apple-darwin }
+          - { os: macos-13,         target: x86_64-apple-darwin }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: package
+        run: |
+          set -eu
+          name="ppk2_tool-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/ppk2_tool" "target/${{ matrix.target }}/release/ppk2_tool-gui" "dist/$name/"
+          cp README.md LICENSE "dist/$name/"
+          cp -r docs packaging "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ppk2_tool-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - name: move the rolling tag
+        if: github.ref == 'refs/heads/master'
+        run: |
+          git tag -f latest
+          git push -f origin latest
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref == 'refs/heads/master' && 'latest' || github.ref_name }}
+          name: ${{ github.ref == 'refs/heads/master' && format('latest ({0})', github.sha) || github.ref_name }}
+          prerelease: ${{ github.ref == 'refs/heads/master' }}
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS

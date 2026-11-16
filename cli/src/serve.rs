@@ -26,6 +26,8 @@ struct State {
     started_unix_ms: Option<u64>,
     spool_dir: PathBuf,
     generation: u64,
+    exe: String,
+    exe_mtime_ms: u64,
 }
 
 impl State {
@@ -46,6 +48,8 @@ impl State {
             records: self.records,
             dropped: self.dropped,
             started_unix_ms: self.started_unix_ms,
+            exe: self.exe.clone(),
+            exe_mtime_ms: self.exe_mtime_ms,
         }
     }
 }
@@ -75,18 +79,21 @@ pub fn run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::load()?;
     std::fs::create_dir_all(&spool_dir)?;
-    let dev = Ppk2::open(&port, settings.mode)?;
+    let dev = Ppk2::open(&port, settings.mode, settings.millivolts)?;
+    let exe = std::env::current_exe()?;
     let state = Arc::new(Mutex::new(State {
         port: port.clone(),
         hw: dev.metadata.hw,
+        power: settings.mode == PowerMode::Ampere,
         settings,
-        power: false,
         measuring: false,
         records: 0,
         dropped: 0,
         started_unix_ms: None,
         spool_dir,
         generation: 0,
+        exe_mtime_ms: proto::mtime_ms(&exe),
+        exe: exe.display().to_string(),
     }));
     let (jobs_tx, jobs_rx) = std::sync::mpsc::channel::<Job>();
     let listener = bind(&socket)?;
@@ -201,19 +208,8 @@ fn apply(
 ) -> Result<(), Error> {
     match cmd {
         DevCmd::SetMode(mode) => {
-            let running = match mode {
-                PowerMode::Source => {
-                    dev.power(false)?;
-                    dev.set_power_mode(mode)?;
-                    false
-                }
-                PowerMode::Ampere => {
-                    dev.set_power_mode(mode)?;
-                    dev.power(true)?;
-                    true
-                }
-            };
-            with_state(state, |st| st.power = running);
+            dev.enter_mode(mode)?;
+            with_state(state, |st| st.power = mode == PowerMode::Ampere);
             persist(state, |s| s.mode = mode)
         }
         DevCmd::SetVoltage(mv) => {

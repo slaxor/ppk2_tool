@@ -172,12 +172,31 @@ fn feed_loop(mut reader: BufReader<UnixStream>, tx: Sender<Event>, ctx: egui::Co
     }
 }
 
-fn spawn_daemon() -> Result<Child, Error> {
-    let sibling = std::env::current_exe()
+/// The `ppk2_tool` installed next to this GUI, if there is one.
+pub fn sibling_daemon_exe() -> Option<PathBuf> {
+    std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.join("ppk2_tool")))
-        .filter(|p| p.is_file());
-    let exe = sibling.unwrap_or_else(|| PathBuf::from("ppk2_tool"));
+        .filter(|p| p.is_file())
+}
+
+/// Why the running daemon is not the binary this GUI would start, if it isn't.
+pub fn stale_daemon(status: &Status) -> Option<String> {
+    let ours = sibling_daemon_exe()?;
+    let same_file = ours.canonicalize().ok() == Path::new(&status.exe).canonicalize().ok();
+    if !same_file {
+        return Some(format!(
+            "daemon runs {}, not {}",
+            status.exe,
+            ours.display()
+        ));
+    }
+    (proto::mtime_ms(&ours) != status.exe_mtime_ms)
+        .then(|| "daemon is older than its binary on disk: restart it".to_owned())
+}
+
+fn spawn_daemon() -> Result<Child, Error> {
+    let exe = sibling_daemon_exe().unwrap_or_else(|| PathBuf::from("ppk2_tool"));
     Command::new(&exe)
         .arg("serve")
         .stdin(Stdio::null())

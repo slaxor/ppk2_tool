@@ -34,8 +34,13 @@ Replies are `{"reply":"ok"}`, `{"reply":"error","message":"..."}` or
 ```json
 {"reply":"status","port":"/dev/...","hw":24455,"mode":"source",
  "millivolts":3300,"fold":10,"power":false,"measuring":false,
- "records":0,"dropped":0,"started_unix_ms":1763240000000}
+ "records":0,"dropped":0,"started_unix_ms":1763240000000,
+ "exe":"/nix/store/...-ppk2_tool/bin/ppk2_tool","exe_mtime_ms":1}
 ```
+
+`exe` and `exe_mtime_ms` identify the daemon's binary as it was when the
+daemon started; the GUI compares them with the `ppk2_tool` next to itself and
+warns when they differ.
 
 `set` persists `mode`, `millivolts` and `fold` to
 `$XDG_CONFIG_HOME/ppk2_tool/settings.toml`. Changing `fold` clears the buffer.

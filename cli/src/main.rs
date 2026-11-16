@@ -49,6 +49,8 @@ impl From<Mode> for PowerMode {
 enum Cmd {
     /// Print every sample as `microamps logic` to stdout
     Stream,
+    /// Measure for a while (default 2 s) and print how the samples spread over the ranges
+    Probe,
     /// Fold samples into records and append them to a file
     Record {
         /// Samples per record (1 = 100 ksps, 100 = 1 ksps, ...)
@@ -81,18 +83,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let spool = spool.unwrap_or_else(|| socket.with_extension(""));
         return serve::run(port, socket, spool);
     }
-    let mut dev = Ppk2::open(&port, cli.mode.into())?;
+    let mut dev = Ppk2::open(&port, cli.mode.into(), cli.mv)?;
     eprintln!(
         "{port}: hw {}, fw calibrated: {}",
         dev.metadata.hw, dev.metadata.calibrated
     );
-    if matches!(cli.mode, Mode::Source) {
-        dev.set_source_voltage(cli.mv)?;
-    }
     dev.power(true)?;
     dev.start_measuring()?;
     let result = match &cli.cmd {
         Cmd::Stream => stream(&mut dev, cli.seconds),
+        Cmd::Probe => probe(&mut dev, cli.seconds.unwrap_or(2)),
         Cmd::Record { fold, file } => record(&mut dev, cli.seconds, *fold, file),
         Cmd::Serve { .. } => unreachable!("handled before the device was opened"),
     };
@@ -134,6 +134,60 @@ fn stream(dev: &mut Ppk2, seconds: Option<u64>) -> Result<(), Box<dyn std::error
             writeln!(out, "{:.3} {:08b}", s.microamps, s.logic)?;
         }
     }
+    Ok(())
+}
+
+#[derive(Default)]
+struct RangeTally {
+    count: u64,
+    sum: f64,
+    min: f32,
+    max: f32,
+}
+
+impl RangeTally {
+    fn add(&mut self, ua: f32) {
+        if self.count == 0 {
+            (self.min, self.max) = (ua, ua);
+        }
+        self.count += 1;
+        self.sum += ua as f64;
+        self.min = self.min.min(ua);
+        self.max = self.max.max(ua);
+    }
+}
+
+fn probe(dev: &mut Ppk2, seconds: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let stop = Stop::after(Some(seconds))?;
+    let mut tallies: [RangeTally; 8] = Default::default();
+    let mut total = RangeTally::default();
+    let mut samples = Vec::new();
+    while stop.keep_going() {
+        samples.clear();
+        dev.read_samples(&mut samples)?;
+        for s in &samples {
+            tallies[s.range as usize & 7].add(s.microamps);
+            total.add(s.microamps);
+        }
+    }
+    println!("range  samples     share  mean µA      min µA       max µA");
+    for (range, t) in tallies.iter().enumerate().filter(|(_, t)| t.count > 0) {
+        println!(
+            "{range:>5}  {:>9}  {:>6.2}%  {:>11.3}  {:>11.3}  {:>11.3}",
+            t.count,
+            100.0 * t.count as f64 / total.count.max(1) as f64,
+            t.sum / t.count as f64,
+            t.min,
+            t.max
+        );
+    }
+    println!(
+        "  all  {:>9}           {:>11.3}  {:>11.3}  {:>11.3}",
+        total.count,
+        total.sum / total.count.max(1) as f64,
+        total.min,
+        total.max
+    );
     Ok(())
 }
 

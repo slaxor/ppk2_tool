@@ -10,6 +10,15 @@ pub enum PowerMode {
     Ampere,
 }
 
+impl PowerMode {
+    pub fn wire_code(self) -> u8 {
+        match self {
+            PowerMode::Ampere => 1,
+            PowerMode::Source => 2,
+        }
+    }
+}
+
 /// A command as the firmware understands it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -28,8 +37,7 @@ impl Command {
     pub fn to_bytes(self) -> Vec<u8> {
         match self {
             Command::GetMetadata => vec![0x19],
-            Command::SetPowerMode(PowerMode::Ampere) => vec![0x11, 0x01],
-            Command::SetPowerMode(PowerMode::Source) => vec![0x11, 0x02],
+            Command::SetPowerMode(mode) => vec![0x11, mode.wire_code()],
             Command::RegulatorSet { millivolts } => {
                 let [hi, lo] = millivolts.to_be_bytes();
                 vec![0x0d, hi, lo]

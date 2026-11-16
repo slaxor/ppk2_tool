@@ -179,6 +179,7 @@ mod tests {
         Sample {
             microamps: ua,
             logic,
+            range: 0,
         }
     }
 

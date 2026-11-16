@@ -1,0 +1,4 @@
+# Nordic Semiconductor Power Profiler Kit II
+# group access for the CDC ports, and no USB autosuspend during long measurements
+SUBSYSTEM=="usb", ATTR{idVendor}=="1915", ATTR{idProduct}=="c00a", GROUP="dialout", MODE="0660", ATTR{power/control}="on"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="c00a", GROUP="dialout", MODE="0660"
