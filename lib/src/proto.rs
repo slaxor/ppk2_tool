@@ -134,8 +134,11 @@ pub fn read_frame(r: &mut impl Read) -> Result<Option<Frame>, Error> {
             String::from_utf8(body).map_err(|e| Error::Protocol(e.to_string()))?,
         ))),
         KIND_RECORDS if body.len().is_multiple_of(RECORD_LEN) => Ok(Some(Frame::Records(
-            body.chunks_exact(RECORD_LEN)
-                .map(|c| Record::from_bytes(c.try_into().expect("chunks_exact yields RECORD_LEN")))
+            body.as_chunks()
+                .0
+                .iter()
+                .copied()
+                .map(Record::from_bytes)
                 .collect(),
         ))),
         KIND_RECORDS => Err(Error::Protocol("record frame not a multiple of 16".into())),

@@ -52,10 +52,7 @@ impl FrameSplitter {
     pub fn push<'a>(&'a mut self, bytes: &[u8]) -> impl Iterator<Item = RawSample> + 'a {
         self.pending.extend_from_slice(bytes);
         let whole = self.pending.len() / FRAME_LEN * FRAME_LEN;
-        let frames: Vec<[u8; FRAME_LEN]> = self.pending[..whole]
-            .chunks_exact(FRAME_LEN)
-            .map(|c| c.try_into().expect("chunks_exact yields FRAME_LEN"))
-            .collect();
+        let frames: Vec<[u8; FRAME_LEN]> = self.pending[..whole].as_chunks().0.to_vec();
         self.pending.drain(..whole);
         frames
             .into_iter()

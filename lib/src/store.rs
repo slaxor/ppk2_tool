@@ -108,8 +108,11 @@ impl Reader {
         self.pending.extend_from_slice(&buf);
         let whole = self.pending.len() / RECORD_LEN * RECORD_LEN;
         let records = self.pending[..whole]
-            .chunks_exact(RECORD_LEN)
-            .map(|c| Record::from_bytes(c.try_into().expect("chunks_exact yields RECORD_LEN")))
+            .as_chunks()
+            .0
+            .iter()
+            .copied()
+            .map(Record::from_bytes)
             .collect();
         self.pending.drain(..whole);
         Ok(records)
