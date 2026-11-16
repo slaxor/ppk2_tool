@@ -1,3 +1,4 @@
+[![ci](https://github.com/slaxor/ppk2_tool/actions/workflows/ci.yml/badge.svg)](https://github.com/slaxor/ppk2_tool/actions/workflows/ci.yml)
 # ppk2_tool
 
 Host-side tooling for Nordic's Power Profiler Kit II, without nRF Connect.
