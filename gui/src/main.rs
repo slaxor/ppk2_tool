@@ -283,13 +283,7 @@ impl App {
         let size = egui::vec2(ui.available_width(), 28.0);
         let power_label = if self.power { "power on" } else { "power off" };
         let power = egui::Button::selectable(self.power, power_label);
-        if ui
-            .add_enabled_ui(self.mode == PowerMode::Source, |ui| {
-                ui.add_sized(size, power)
-            })
-            .inner
-            .clicked()
-        {
+        if ui.add_sized(size, power).clicked() {
             self.power = !self.power;
             self.send(Request::Power { on: self.power });
         }
