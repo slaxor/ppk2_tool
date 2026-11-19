@@ -29,16 +29,16 @@
           libxkbcommon
           vulkan-loader
           wayland
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXi
-          xorg.libXrandr
+          libx11
+          libxcursor
+          libxi
+          libxrandr
         ];
       version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
     in
     {
       packages = forAllSystems (pkgs: {
-        default = self.packages.${pkgs.system}.ppk2_tool;
+        default = self.packages.${pkgs.stdenv.hostPlatform.system}.ppk2_tool;
         ppk2_tool = pkgs.rustPlatform.buildRustPackage {
           pname = "ppk2_tool";
           inherit version;
@@ -91,7 +91,7 @@
             enable = lib.mkEnableOption "ppk2_tool, host software for the Nordic Power Profiler Kit II";
             package = lib.mkOption {
               type = lib.types.package;
-              default = self.packages.${pkgs.system}.ppk2_tool;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.ppk2_tool;
               description = "The ppk2_tool package to install.";
             };
             settings = lib.mkOption {
